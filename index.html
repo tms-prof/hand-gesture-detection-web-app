@@ -1,1 +1,282 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Leitor de Gestos</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0B0E13;
+    --panel:#141A22;
+    --panel-alt:#0F141B;
+    --border:#232B36;
+    --text:#E7EAEE;
+    --muted:#8A94A3;
+    --accent:#F2A93B;
+    --accent-dim:#6B5427;
+    --tracking:#55D6C0;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--text);
+    font-family:'Space Grotesk',system-ui,sans-serif;}
+  .wrap{max-width:1100px;margin:0 auto;padding:28px 20px 60px;}
+  header{margin-bottom:22px;}
+  header h1{font-size:28px;font-weight:700;margin:0 0 6px;letter-spacing:-0.01em;}
+  header p{color:var(--muted);margin:0;font-size:15px;max-width:52ch;line-height:1.5;}
 
+  .grid{display:grid;grid-template-columns:1.4fr 1fr;gap:18px;}
+  @media (max-width:820px){ .grid{grid-template-columns:1fr;} }
+
+  .stage{
+    position:relative;background:#000;border:1px solid var(--border);
+    border-radius:10px;overflow:hidden;aspect-ratio:4/3;
+  }
+  .stage video, .stage canvas{
+    position:absolute;inset:0;width:100%;height:100%;object-fit:cover;
+  }
+  .stage video{visibility:hidden;}
+  .corner{position:absolute;width:22px;height:22px;border:2px solid var(--accent);opacity:.85;}
+  .corner.tl{top:10px;left:10px;border-right:none;border-bottom:none;}
+  .corner.tr{top:10px;right:10px;border-left:none;border-bottom:none;}
+  .corner.bl{bottom:10px;left:10px;border-right:none;border-top:none;}
+  .corner.br{bottom:10px;right:10px;border-left:none;border-top:none;}
+
+  .idle-msg{
+    position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    flex-direction:column;gap:14px;color:var(--muted);font-size:14px;text-align:center;padding:20px;
+  }
+  button{
+    font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:14px;
+    background:var(--accent);color:#201604;border:none;border-radius:7px;
+    padding:11px 20px;cursor:pointer;
+  }
+  button.secondary{background:transparent;color:var(--text);border:1px solid var(--border);}
+  button:disabled{opacity:.4;cursor:default;}
+
+  .panel{background:var(--panel);border:1px solid var(--border);border-radius:10px;
+    padding:18px;display:flex;flex-direction:column;gap:18px;}
+
+  .readout{border-bottom:1px solid var(--border);padding-bottom:16px;}
+  .readout .label{color:var(--muted);font-size:12.5px;margin-bottom:6px;}
+  .readout .value{font-family:'JetBrains Mono',monospace;font-size:22px;font-weight:500;
+    color:var(--accent);transition:color .15s ease;min-height:28px;}
+  .readout .value.off{color:var(--muted);}
+
+  .guide{display:flex;flex-direction:column;gap:10px;}
+  .guide .label{color:var(--muted);font-size:12.5px;margin-bottom:2px;}
+  .gesture-row{
+    display:flex;align-items:center;gap:12px;padding:9px 10px;border:1px solid var(--border);
+    border-radius:7px;background:var(--panel-alt);
+  }
+  .gesture-row.active{border-color:var(--accent);background:#20180a;}
+  .gesture-row .emoji{font-size:20px;width:26px;text-align:center;}
+  .gesture-row .names{display:flex;flex-direction:column;line-height:1.3;}
+  .gesture-row .gname{font-size:13.5px;}
+  .gesture-row .gcmd{font-size:12px;color:var(--muted);font-family:'JetBrains Mono',monospace;}
+
+  .log{flex:1;display:flex;flex-direction:column;gap:6px;min-height:0;}
+  .log .label{color:var(--muted);font-size:12.5px;}
+  .log ul{list-style:none;margin:0;padding:0;overflow-y:auto;max-height:170px;
+    display:flex;flex-direction:column-reverse;gap:4px;}
+  .log li{font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--text);
+    border-left:2px solid var(--accent-dim);padding:3px 0 3px 9px;}
+  .log li span{color:var(--muted);margin-right:8px;}
+
+  .hint{font-size:11.5px;color:var(--muted);line-height:1.5;border-top:1px solid var(--border);padding-top:12px;}
+  code{background:var(--panel-alt);padding:1px 5px;border-radius:4px;font-size:11px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Leitor de Gestos</h1>
+    <p>Mostre a mão pra câmera e faça: polegar pra cima, polegar pra baixo, indicador pra cima ou indicador pra baixo. Cada gesto dispara um comando.</p>
+  </header>
+
+  <div class="grid">
+    <div class="stage" id="stage">
+      <video id="video" playsinline></video>
+      <canvas id="canvas"></canvas>
+      <div class="corner tl"></div><div class="corner tr"></div>
+      <div class="corner bl"></div><div class="corner br"></div>
+      <div class="idle-msg" id="idleMsg">
+        <div>A câmera aparece aqui.</div>
+        <button id="startBtn">Ativar câmera</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="readout">
+        <div class="label">Gesto detectado</div>
+        <div class="value off" id="gestureValue">nenhum</div>
+      </div>
+
+      <div class="guide">
+        <div class="label">Gestos e comandos</div>
+        <div class="gesture-row" data-g="thumb_up"><span class="emoji">👍</span>
+          <div class="names"><span class="gname">Polegar pra cima</span><span class="gcmd">cmd: proximo</span></div></div>
+        <div class="gesture-row" data-g="thumb_down"><span class="emoji">👎</span>
+          <div class="names"><span class="gname">Polegar pra baixo</span><span class="gcmd">cmd: anterior</span></div></div>
+        <div class="gesture-row" data-g="index_up"><span class="emoji">☝️</span>
+          <div class="names"><span class="gname">Indicador pra cima</span><span class="gcmd">cmd: aumentar_volume</span></div></div>
+        <div class="gesture-row" data-g="index_down"><span class="emoji">👇</span>
+          <div class="names"><span class="gname">Indicador pra baixo</span><span class="gcmd">cmd: diminuir_volume</span></div></div>
+      </div>
+
+      <div class="log">
+        <div class="label">Comandos disparados</div>
+        <ul id="logList"></ul>
+      </div>
+
+      <div class="hint">
+        Precisa de HTTPS (ou <code>localhost</code>) pra câmera funcionar no navegador. Pra testar no celular, hospede o arquivo (ex: GitHub Pages) e abra o link nele. Pra ligar cada gesto numa ação de verdade, edite o objeto <code>GESTURE_ACTIONS</code> no fim do arquivo.
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+<script>
+const videoEl = document.getElementById('video');
+const canvasEl = document.getElementById('canvas');
+const ctx = canvasEl.getContext('2d');
+const stageEl = document.getElementById('stage');
+const idleMsg = document.getElementById('idleMsg');
+const startBtn = document.getElementById('startBtn');
+const gestureValue = document.getElementById('gestureValue');
+const logList = document.getElementById('logList');
+const rows = document.querySelectorAll('.gesture-row');
+
+let audioCtx = null;
+function beep(freq){
+  audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+  const o = audioCtx.createOscillator();
+  const g = audioCtx.createGain();
+  o.frequency.value = freq;
+  o.type = 'sine';
+  g.gain.setValueAtTime(0.15, audioCtx.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.18);
+  o.connect(g); g.connect(audioCtx.destination);
+  o.start(); o.stop(audioCtx.currentTime + 0.18);
+}
+
+// ---- Aqui é onde cada gesto vira uma ação de verdade ----
+const GESTURE_ACTIONS = {
+  thumb_up:   { label: 'Polegar pra cima',   cmd: 'proximo',           freq: 660, run: () => {} },
+  thumb_down: { label: 'Polegar pra baixo',  cmd: 'anterior',          freq: 440, run: () => {} },
+  index_up:   { label: 'Indicador pra cima', cmd: 'aumentar_volume',   freq: 550, run: () => {} },
+  index_down: { label: 'Indicador pra baixo',cmd: 'diminuir_volume',   freq: 330, run: () => {} },
+};
+
+function logCommand(gestureKey){
+  const a = GESTURE_ACTIONS[gestureKey];
+  beep(a.freq);
+  a.run();
+  const li = document.createElement('li');
+  const time = new Date().toLocaleTimeString('pt-BR', {hour12:false});
+  li.innerHTML = `<span>${time}</span>${a.cmd}`;
+  logList.appendChild(li);
+  if (logList.children.length > 30) logList.removeChild(logList.firstChild);
+  rows.forEach(r => r.classList.toggle('active', r.dataset.g === gestureKey));
+  gestureValue.textContent = a.label.toLowerCase();
+  gestureValue.classList.remove('off');
+}
+
+// ---- Classificação geométrica dos landmarks ----
+function dist(a, b){ return Math.hypot(a.x - b.x, a.y - b.y); }
+
+function fingerState(lm, tip, mid, mcp, wrist){
+  const extended = dist(wrist, lm[tip]) > dist(wrist, lm[mid]) * 1.05;
+  const dy = lm[tip].y - lm[mcp].y; // negativo = apontando pra cima
+  return { extended, dy };
+}
+
+function classify(lm){
+  const wrist = lm[0];
+  const thumb  = fingerState(lm, 4, 3, 2, wrist);
+  const index  = fingerState(lm, 8, 6, 5, wrist);
+  const middle = fingerState(lm, 12, 10, 9, wrist);
+  const ring   = fingerState(lm, 16, 14, 13, wrist);
+  const pinky  = fingerState(lm, 20, 18, 17, wrist);
+
+  const othersCurled = !middle.extended && !ring.extended && !pinky.extended;
+  const DY_TH = 0.045;
+
+  if (thumb.extended && !index.extended && othersCurled){
+    if (thumb.dy < -DY_TH) return 'thumb_up';
+    if (thumb.dy > DY_TH) return 'thumb_down';
+  }
+  if (index.extended && !thumb.extended && othersCurled){
+    if (index.dy < -DY_TH) return 'index_up';
+    if (index.dy > DY_TH) return 'index_down';
+  }
+  return null;
+}
+
+// ---- Estabilização: exige o mesmo gesto por N frames seguidos ----
+const STABLE_FRAMES = 5;
+const COOLDOWN_MS = 900;
+let frameGesture = null, stableCount = 0, lastFired = null, lastFiredAt = 0;
+
+function handleGesture(g){
+  const now = performance.now();
+  if (g === frameGesture) stableCount++; else { frameGesture = g; stableCount = 1; }
+
+  if (g && stableCount >= STABLE_FRAMES){
+    if (g !== lastFired || (now - lastFiredAt) > COOLDOWN_MS){
+      logCommand(g);
+      lastFired = g; lastFiredAt = now;
+    }
+  } else if (!g){
+    lastFired = null;
+    gestureValue.textContent = 'nenhum';
+    gestureValue.classList.add('off');
+    rows.forEach(r => r.classList.remove('active'));
+  }
+}
+
+// ---- MediaPipe Hands ----
+const hands = new Hands({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
+hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.7, minTrackingConfidence: 0.7 });
+
+hands.onResults((results) => {
+  canvasEl.width = stageEl.clientWidth;
+  canvasEl.height = stageEl.clientHeight;
+  ctx.save();
+  ctx.clearRect(0, 0, canvasEl.width, canvasEl.height);
+  ctx.translate(canvasEl.width, 0);
+  ctx.scale(-1, 1);
+  ctx.drawImage(results.image, 0, 0, canvasEl.width, canvasEl.height);
+
+  if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0){
+    const lm = results.multiHandLandmarks[0];
+    drawConnectors(ctx, lm, HAND_CONNECTIONS, { color: '#55D6C055', lineWidth: 2 });
+    drawLandmarks(ctx, lm, { color: '#55D6C0', lineWidth: 1, radius: 3 });
+    handleGesture(classify(lm));
+  } else {
+    handleGesture(null);
+  }
+  ctx.restore();
+});
+
+startBtn.addEventListener('click', async () => {
+  idleMsg.style.display = 'none';
+  const camera = new Camera(videoEl, {
+    onFrame: async () => { await hands.send({ image: videoEl }); },
+    width: 640,
+    height: 480,
+  });
+  try {
+    await camera.start();
+  } catch (err) {
+    idleMsg.style.display = 'flex';
+    idleMsg.innerHTML = `<div>Não deu pra acessar a câmera: ${err.message}. Verifique a permissão do navegador.</div>`;
+  }
+});
+</script>
+</body>
+</html>
